@@ -9,31 +9,32 @@ import java.util.*;
  * size, and the file is simply a collection of those pages. HeapFile works
  * closely with HeapPage. The format of HeapPages is described in the HeapPage
  * constructor.
- * 
- * @see simpledb.HeapPage#HeapPage
+ *
  * @author Sam Madden
+ * @see simpledb.HeapPage#HeapPage
  */
 public class HeapFile implements DbFile {
+    private File file;
+    private TupleDesc tupleDesc;
 
     /**
      * Constructs a heap file backed by the specified file.
-     * 
-     * @param f
-     *            the file that stores the on-disk backing store for this heap
-     *            file.
+     *
+     * @param f the file that stores the on-disk backing store for this heap
+     *          file.
      */
     public HeapFile(File f, TupleDesc td) {
-        // some code goes here
+        this.file = f;
+        this.tupleDesc = td;
     }
 
     /**
      * Returns the File backing this HeapFile on disk.
-     * 
+     *
      * @return the File backing this HeapFile on disk.
      */
     public File getFile() {
-        // some code goes here
-        return null;
+        return this.file;
     }
 
     /**
@@ -42,28 +43,45 @@ public class HeapFile implements DbFile {
      * HeapFile has a "unique id," and that you always return the same value for
      * a particular HeapFile. We suggest hashing the absolute file name of the
      * file underlying the heapfile, i.e. f.getAbsoluteFile().hashCode().
-     * 
+     *
      * @return an ID uniquely identifying this HeapFile.
      */
     public int getId() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return file.hashCode();
     }
 
     /**
      * Returns the TupleDesc of the table stored in this DbFile.
-     * 
+     *
      * @return TupleDesc of this DbFile.
      */
     public TupleDesc getTupleDesc() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return this.tupleDesc;
     }
 
     // see DbFile.java for javadocs
     public Page readPage(PageId pid) {
-        // some code goes here
-        return null;
+        BufferedInputStream in = null;
+        try {
+            in = new BufferedInputStream(new FileInputStream(this.file));
+            int pageSize = BufferPool.getPageSize();
+            int pageNo = pid.getPageNumber();
+            byte[] onePageData = new byte[pageSize];
+            in.skip(pageNo * pageSize);
+            in.read(onePageData, 0, pageSize);
+            Page onePage = new HeapPage((HeapPageId) pid, onePageData);
+            return onePage;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            // Close the file on success or error
+            try {
+                if (in != null)
+                    in.close();
+            } catch (IOException ioe) {
+                // Ignore failures closing the file
+            }
+        }
     }
 
     // see DbFile.java for javadocs
@@ -77,7 +95,9 @@ public class HeapFile implements DbFile {
      */
     public int numPages() {
         // some code goes here
-        return 0;
+        int pageSize = BufferPool.getPageSize();
+        int num = (int) Math.ceil((double) this.file.length() / (double) pageSize);
+        return num;
     }
 
     // see DbFile.java for javadocs
@@ -98,8 +118,85 @@ public class HeapFile implements DbFile {
 
     // see DbFile.java for javadocs
     public DbFileIterator iterator(TransactionId tid) {
-        // some code goes here
-        return null;
+        return new HeapFileIterator(this, tid);
+    }
+
+    /**
+     * Helper class that implements the Java Iterator for tuples on a BTreeFile
+     */
+    class HeapFileIterator extends AbstractDbFileIterator {
+
+        Iterator<Tuple> it = null;
+        HeapPage curp = null;
+
+        TransactionId tid;
+        HeapFile f;
+
+        /**
+         * Constructor for this iterator
+         *
+         * @param f   - the BTreeFile containing the tuples
+         * @param tid - the transaction id
+         */
+        public HeapFileIterator(HeapFile f, TransactionId tid) {
+            this.f = f;
+            this.tid = tid;
+        }
+
+        /**
+         * Open this iterator by getting an iterator on the first leaf page
+         */
+        public void open() throws DbException, TransactionAbortedException {
+            HeapPageId root = new HeapPageId(f.getId(), 0);
+            curp = (HeapPage) Database.getBufferPool().getPage(tid, root, Permissions.READ_ONLY);
+            it = curp.iterator();
+        }
+
+        /**
+         * Read the next tuple either from the current page if it has more tuples or
+         * from the next page by following the right sibling pointer.
+         *
+         * @return the next tuple, or null if none exists
+         */
+        @Override
+        protected Tuple readNext() throws TransactionAbortedException, DbException {
+            if (it != null && !it.hasNext())
+                it = null;
+
+            while (it == null && curp != null) {
+                HeapPageId nextp = curp.getNextPage(f.numPages());
+                if (nextp == null) {
+                    curp = null;
+                } else {
+                    curp = (HeapPage) Database.getBufferPool().getPage(tid,
+                            nextp, Permissions.READ_ONLY);
+                    it = curp.iterator();
+                    if (!it.hasNext())
+                        it = null;
+                }
+            }
+
+            if (it == null)
+                return null;
+            return it.next();
+        }
+
+        /**
+         * rewind this iterator back to the beginning of the tuples
+         */
+        public void rewind() throws DbException, TransactionAbortedException {
+            close();
+            open();
+        }
+
+        /**
+         * close the iterator
+         */
+        public void close() {
+            super.close();
+            it = null;
+            curp = null;
+        }
     }
 
 }
