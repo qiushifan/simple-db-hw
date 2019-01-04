@@ -2,9 +2,7 @@ package simpledb;
 
 import java.io.*;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -35,6 +33,8 @@ public class BufferPool {
 
     private int maxPageNum = 0;
     private Map<PageId, Page> pageMap = new HashMap<>();
+
+    Queue<PageId> queue = new LinkedList<PageId>();
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -81,11 +81,12 @@ public class BufferPool {
         Page res = null;
         if (pageMap.get(pid) == null) {
             if (pageMap.size() >= maxPageNum) {
-                throw new DbException("");
-            } else {
+                evictPage();
+            }
                 res = Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid);
                 pageMap.put(pid, res);
-            }
+                queue.offer(pid);
+
         } else {
             res = pageMap.get(pid);
         }
@@ -159,8 +160,11 @@ public class BufferPool {
      */
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        // not necessary for lab1
+        HeapFile table = (HeapFile) Database.getCatalog().getDatabaseFile(tableId);
+        List<Page> affectedPages = table.insertTuple(tid, t);
+        for (Page page : affectedPages) {
+            page.markDirty(true, tid);
+        }
     }
 
     /**
@@ -178,8 +182,12 @@ public class BufferPool {
      */
     public void deleteTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        // not necessary for lab1
+        int tableId=t.getRecordId().getPageId().getTableId();
+        HeapFile table = (HeapFile) Database.getCatalog().getDatabaseFile(tableId);
+        List<Page> affectedPage = table.deleteTuple(tid, t);
+        for(Page page:affectedPage) {
+            page.markDirty(true, tid);
+        }
     }
 
     /**
@@ -213,8 +221,9 @@ public class BufferPool {
      * @param pid an ID indicating the page to flush
      */
     private synchronized void flushPage(PageId pid) throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        Page page = this.pageMap.get(pid);
+        HeapFile table = (HeapFile) Database.getCatalog().getDatabaseFile(page.getId().getTableId());
+        table.writePage(page);
     }
 
     /**
@@ -230,8 +239,13 @@ public class BufferPool {
      * Flushes the page to disk to ensure dirty pages are updated on disk.
      */
     private synchronized void evictPage() throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        PageId pid = queue.poll();
+        try {
+            flushPage(pid);
+            this.pageMap.remove(pid);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
 }

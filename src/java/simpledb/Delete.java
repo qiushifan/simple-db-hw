@@ -1,6 +1,9 @@
 package simpledb;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 /**
  * The delete operator. Delete reads tuples from its child operator and removes
@@ -9,6 +12,10 @@ import java.io.IOException;
 public class Delete extends Operator {
 
     private static final long serialVersionUID = 1L;
+    private OpIterator child;
+    private TransactionId id;
+    private Iterator<Tuple> it;
+    private List<Tuple> allres;
 
     /**
      * Constructor specifying the transaction that this delete belongs to as
@@ -20,24 +27,42 @@ public class Delete extends Operator {
      *            The child operator from which to read tuples for deletion
      */
     public Delete(TransactionId t, OpIterator child) {
-        // some code goes here
+        this.child = child;
+        this.id = t;
+        this.allres = new ArrayList<>();
+        this.it = null;
     }
 
     public TupleDesc getTupleDesc() {
-        // some code goes here
-        return null;
+        return new TupleDesc(new Type[]{Type.INT_TYPE});
     }
 
     public void open() throws DbException, TransactionAbortedException {
-        // some code goes here
+        child.open();
+        int count =0;
+        while (child.hasNext()) {
+            Tuple tmp = child.next();
+            try {
+                Database.getBufferPool().deleteTuple(this.id,tmp);
+                count++;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        Tuple t = new Tuple(this.getTupleDesc());
+        t.setField(0,new IntField(count));
+        allres.add(t);
+        it = allres.iterator();
+        super.open();
     }
 
     public void close() {
-        // some code goes here
+        super.close();
+        it = null;
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
-        // some code goes here
+        it = allres.iterator();
     }
 
     /**
@@ -50,19 +75,20 @@ public class Delete extends Operator {
      * @see BufferPool#deleteTuple
      */
     protected Tuple fetchNext() throws TransactionAbortedException, DbException {
-        // some code goes here
-        return null;
+        if (it != null && it.hasNext()) {
+            return it.next();
+        } else
+            return null;
     }
 
     @Override
     public OpIterator[] getChildren() {
-        // some code goes here
-        return null;
+        return new OpIterator[] { this.child };
     }
 
     @Override
     public void setChildren(OpIterator[] children) {
-        // some code goes here
+        this.child = children[0];
     }
 
 }

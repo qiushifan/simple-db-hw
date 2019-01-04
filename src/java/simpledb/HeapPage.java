@@ -21,6 +21,8 @@ public class HeapPage implements Page {
     byte[] oldData;
     private final Byte oldDataLock = new Byte((byte) 0);
 
+    private TransactionId lastDirtyOperation;
+
     /**
      * Create a HeapPage from a set of bytes of data read from disk.
      * The format of a HeapPage is a set of header bytes indicating
@@ -244,8 +246,14 @@ public class HeapPage implements Page {
      *                     already empty.
      */
     public void deleteTuple(Tuple t) throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        RecordId tid = t.getRecordId();
+        HeapPageId hpid = (HeapPageId) tid.getPageId();
+        int tupleNum = tid.getTupleNumber();
+        if (!hpid.equals(pid) || !isSlotUsed(tupleNum)) {
+            throw new DbException("this tuple is not on this page, or tuple slot is already empty");
+        }
+        tuples[tupleNum]=null;
+        markSlotUsed(tupleNum, false);
     }
 
     /**
@@ -257,8 +265,19 @@ public class HeapPage implements Page {
      *                     is mismatch.
      */
     public void insertTuple(Tuple t) throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        if (!td.equals(t.getTupleDesc())) throw new DbException("tupleDesc is mismatch");
+        //不使用getNumTuples() == 0来判断是否没有可用的slot，因为要找到可用的slot本身就要遍历一次tuples数组
+        //if(getNumTuples() == 0) throw new DbException("the page is full (no empty slots)");
+        for(int i=0;i<getNumTuples();i++) {
+            if (!isSlotUsed(i)) {
+                tuples[i] = t;
+                //修改tuple的信息，表明它现在存储在这个page上
+                t.setRecordId(new RecordId(pid, i));
+                markSlotUsed(i,true);
+                return;
+            }
+        }
+        throw new DbException("the page is full (no empty slots)");
     }
 
     /**
@@ -266,17 +285,14 @@ public class HeapPage implements Page {
      * that did the dirtying
      */
     public void markDirty(boolean dirty, TransactionId tid) {
-        // some code goes here
-        // not necessary for lab1
+        lastDirtyOperation = dirty ? tid : null;
     }
 
     /**
      * Returns the tid of the transaction that last dirtied this page, or null if the page is not dirty
      */
     public TransactionId isDirty() {
-        // some code goes here
-        // Not necessary for lab1
-        return null;
+        return lastDirtyOperation;
     }
 
     /**
@@ -309,8 +325,19 @@ public class HeapPage implements Page {
      * Abstraction to fill or clear a slot on this page.
      */
     private void markSlotUsed(int i, boolean value) {
-        // some code goes here
-        // not necessary for lab1
+        int byteNum = i / 8;//计算在第几个字节
+        int posInByte = i % 8;//计算在该字节的第几位,从右往左算（这是因为JVM用big-ending）
+        header[byteNum] = editBitInByte(header[byteNum], posInByte, value);
+    }
+
+    private byte editBitInByte(byte target, int posInByte, boolean value) {
+        if (posInByte < 0 || posInByte > 7) {
+            throw new IllegalArgumentException();
+        }
+        byte b = (byte) (1 << posInByte);//将1这个bit移到指定位置，例如pos为3,value为true，将得到00001000
+        //如果value为1,使用字节00001000以及"|"操作可以将指定位置改为1，其他位置不变
+        //如果value为0,使用字节11110111以及"&"操作可以将指定位置改为0，其他位置不变
+        return value ? (byte) (target | b) : (byte) (target & ~b);
     }
 
     /**
