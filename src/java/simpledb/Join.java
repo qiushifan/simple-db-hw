@@ -8,6 +8,11 @@ import java.util.*;
 public class Join extends Operator {
 
     private static final long serialVersionUID = 1L;
+    private JoinPredicate joinPredicate;
+    private OpIterator leftChild;
+    private OpIterator rightChild;
+    private Iterator<Tuple> it;
+    private List<Tuple> allres;
 
     /**
      * Constructor. Accepts two children to join and the predicate to join them
@@ -21,12 +26,14 @@ public class Join extends Operator {
      *            Iterator for the right(inner) relation to join
      */
     public Join(JoinPredicate p, OpIterator child1, OpIterator child2) {
-        // some code goes here
+        this.joinPredicate = p;
+        this.leftChild = child1;
+        this.rightChild = child2;
+        this.allres = new ArrayList<>();
     }
 
     public JoinPredicate getJoinPredicate() {
-        // some code goes here
-        return null;
+        return this.joinPredicate;
     }
 
     /**
@@ -35,8 +42,7 @@ public class Join extends Operator {
      *       alias or table name.
      * */
     public String getJoinField1Name() {
-        // some code goes here
-        return null;
+        return this.leftChild.getTupleDesc().getFieldName(this.joinPredicate.getField1());
     }
 
     /**
@@ -45,8 +51,7 @@ public class Join extends Operator {
      *       alias or table name.
      * */
     public String getJoinField2Name() {
-        // some code goes here
-        return null;
+        return this.rightChild.getTupleDesc().getFieldName(this.joinPredicate.getField2());
     }
 
     /**
@@ -54,21 +59,42 @@ public class Join extends Operator {
      *      implementation logic.
      */
     public TupleDesc getTupleDesc() {
-        // some code goes here
-        return null;
+        return TupleDesc.merge(this.leftChild.getTupleDesc(), this.rightChild.getTupleDesc());
     }
 
     public void open() throws DbException, NoSuchElementException,
             TransactionAbortedException {
-        // some code goes here
+        this.leftChild.open();
+        this.rightChild.open();
+        while(this.leftChild.hasNext()){
+            Tuple left = this.leftChild.next();
+            while (this.rightChild.hasNext()){
+                Tuple right = this.rightChild.next();
+                if(this.joinPredicate.filter(left,right)){
+                    Tuple newTuple = new Tuple(this.getTupleDesc());
+                    for (int i = 0; i < this.leftChild.getTupleDesc().numFields(); i++) {
+                        newTuple.setField(i, left.getField(i));
+                    }
+                    for (int i = this.leftChild.getTupleDesc().numFields(); i < this.getTupleDesc().numFields(); i++) {
+                        newTuple.setField(i, right.getField(i-this.leftChild.getTupleDesc().numFields()));
+                    }
+                    this.allres.add(newTuple);
+                }
+            }
+            this.rightChild.rewind();
+        }
+        this.it = this.allres.iterator();
+        super.open();
     }
 
     public void close() {
-        // some code goes here
+        super.close();
+        this.rightChild.close();
+        this.leftChild.close();
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
-        // some code goes here
+        this.it = this.allres.iterator();
     }
 
     /**
@@ -90,19 +116,23 @@ public class Join extends Operator {
      * @see JoinPredicate#filter
      */
     protected Tuple fetchNext() throws TransactionAbortedException, DbException {
-        // some code goes here
-        return null;
+        if (it != null && it.hasNext()) {
+            return it.next();
+        } else
+            return null;
     }
 
     @Override
     public OpIterator[] getChildren() {
-        // some code goes here
-        return null;
+        return new OpIterator[] { this.leftChild,this.rightChild };
     }
 
     @Override
     public void setChildren(OpIterator[] children) {
-        // some code goes here
+        if(children.length == 2){
+            this.leftChild = children[0];
+            this.rightChild = children[1];
+        }
     }
 
 }
