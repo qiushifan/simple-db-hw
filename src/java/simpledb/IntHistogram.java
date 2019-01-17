@@ -1,8 +1,18 @@
 package simpledb;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 /** A class to represent a fixed-width histogram over a single integer-based field.
  */
 public class IntHistogram {
+    private int bucketsNum;
+    private int maxValue;
+    private int minValue;
+    private int totalNumOfTable;
+    private Map<Integer,Integer> valueMap = new HashMap<>();
 
     /**
      * Create a new IntHistogram.
@@ -21,7 +31,13 @@ public class IntHistogram {
      * @param max The maximum integer value that will ever be passed to this class for histogramming
      */
     public IntHistogram(int buckets, int min, int max) {
-    	// some code goes here
+    	this.bucketsNum = buckets;
+        this.maxValue = max;
+        this.minValue = min;
+        this.totalNumOfTable = 0;
+        for(int i=0;i< buckets;i++){
+            valueMap.put(i,0);
+        }
     }
 
     /**
@@ -29,7 +45,32 @@ public class IntHistogram {
      * @param v Value to add to the histogram
      */
     public void addValue(int v) {
-    	// some code goes here
+        this.totalNumOfTable++;
+        if(v == this.maxValue){
+            int num = this.valueMap.get(this.bucketsNum-1);
+            num=num+1;
+            this.valueMap.put(this.bucketsNum-1,num);
+        }else {
+            double tmp = ((double) maxValue - (double) minValue) / (double) this.bucketsNum;
+            int index = (int) Math.floor((double) (v - minValue) / (double)tmp);
+            int num = this.valueMap.get(index);
+            num=num+1;
+            this.valueMap.put(index,num);
+        }
+
+
+        /*this.totalNumOfTable++;
+        //int tmp = (maxValue-minValue)/this.bucketsNum;
+    	for(int i=0;i<this.bucketsNum;i++){
+    	    int left = this.minValue+i*tmp;
+            int right = left+tmp;
+            if(v >=left && v<right){
+                int num = this.valueMap.get(i);
+                this.valueMap.put(i,num++);
+                break;
+            }
+
+        }*/
     }
 
     /**
@@ -43,9 +84,79 @@ public class IntHistogram {
      * @return Predicted selectivity of this particular operator and value
      */
     public double estimateSelectivity(Predicate.Op op, int v) {
+        if(this.totalNumOfTable <= 0){
+            return -1;
+        }
+        int index = 0;
+        double b_left = 0;
+        double b_right = 0;
+        double tmp = ((double) maxValue - (double) minValue) / (double) this.bucketsNum;
+        boolean isFound = false;
+        for(int i=0;i<this.bucketsNum;i++){
+            double left = this.minValue+(double)i*tmp;
+            double right = left+(double) tmp;
+            if(v >=left && v<right){
+                index = i;
+                b_left = left;
+                b_right = right;
+                isFound = true;
+                break;
+            }
+            if(v == this.maxValue){
+                index = this.bucketsNum-1;
+                b_left = this.maxValue-(double)tmp;
+                b_right = this.maxValue;
+                isFound = true;
+                break;
+            }
+        }
+        int size = this.valueMap.get(index);
 
-    	// some code goes here
-        return -1.0;
+    	if(op == Predicate.Op.EQUALS){
+            if(!isFound){
+                return 0d;
+            }
+            return ((double) size/(double) tmp)/((double) this.totalNumOfTable);
+        }else if(op == Predicate.Op.GREATER_THAN ){
+            if(!isFound){
+                return this.minValue>v ? 1d:0d;
+            }
+            double b_f = (double) size/(double) this.totalNumOfTable;
+            double b_part = ((double) b_right-(double) v)/(double) tmp;
+            int sum = 0;
+            for(int k = index+1;k<this.bucketsNum;k++){
+                sum += this.valueMap.get(k);
+            }
+            return (b_f * b_part+(double) sum/(double) this.totalNumOfTable);
+
+        }else if(op == Predicate.Op.LESS_THAN){
+            if(!isFound){
+                return this.maxValue<v ? 1d:0d;
+            }
+            double b_f = (double) size/(double) this.totalNumOfTable;
+            double b_part = ((double) v-(double) b_left)/(double) tmp;
+            int sum = 0;
+            for(int k = 0;k<index;k++){
+                sum += this.valueMap.get(k);
+            }
+            return (b_f * b_part+(double) sum/(double) this.totalNumOfTable);
+
+        }else if(op == Predicate.Op.LESS_THAN_OR_EQ){
+            if(!isFound){
+                return this.maxValue<v ? 1d:0d;
+            }
+            return estimateSelectivity(Predicate.Op.LESS_THAN,v)+estimateSelectivity(Predicate.Op.EQUALS,v);
+
+        }else if(op == Predicate.Op.GREATER_THAN_OR_EQ){
+            if(!isFound){
+                return this.minValue>v ? 1d:0d;
+            }
+            return estimateSelectivity(Predicate.Op.GREATER_THAN,v)+estimateSelectivity(Predicate.Op.EQUALS,v);
+        }else if(op == Predicate.Op.NOT_EQUALS){
+            return (1d-estimateSelectivity(Predicate.Op.EQUALS,v));
+        }else {
+            return -1;
+        }
     }
     
     /**
