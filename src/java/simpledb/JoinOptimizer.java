@@ -102,16 +102,19 @@ public class JoinOptimizer {
      */
     public double estimateJoinCost(LogicalJoinNode j, int card1, int card2,
             double cost1, double cost2) {
+        int blockMemory = 131072;
         if (j instanceof LogicalSubplanJoinNode) {
             // A LogicalSubplanJoinNode represents a subquery.
             // You do not need to implement proper support for these for Lab 3.
             return card1 + cost1 + cost2;
         } else {
-            // Insert your code here.
-            // HINT: You may need to use the variable "j" if you implemented
-            // a join algorithm that's more complicated than a basic
-            // nested-loops join.
-            return -1.0;
+            TupleDesc desc = p.getTupleDesc(j.t1Alias);
+            int blockSize = blockMemory / desc.getSize();
+            int fullNum = card1 / blockSize;
+            int left = (card1 - blockSize * fullNum) == 0 ? 0 : 1;
+            int blockCard = fullNum + left;//得到左表被分成多少个缓冲区
+            double cost = cost1 + blockCard * cost2 + (double) card1 * (double) card2;
+            return cost;
         }
     }
 
@@ -155,8 +158,30 @@ public class JoinOptimizer {
             String field2PureName, int card1, int card2, boolean t1pkey,
             boolean t2pkey, Map<String, TableStats> stats,
             Map<String, Integer> tableAliasToId) {
-        int card = 1;
-        // some code goes here
+        int card;
+        int smallerSize = card1 < card2 ? card1 : card2;
+        int biggerSize = card1 > card2 ? card1 : card2;
+        switch (joinOp) {
+            case EQUALS:
+                if (t1pkey && t2pkey) {
+                    card = smallerSize;
+                } else if (t1pkey && !t2pkey) {
+                    card = card2;
+                } else if (!t1pkey && t2pkey) {
+                    card = card1;
+                } else {
+                    card = biggerSize;
+                }
+                break;
+            case GREATER_THAN:
+            case GREATER_THAN_OR_EQ:
+            case LESS_THAN:
+            case LESS_THAN_OR_EQ:
+                card = (int) (card1 * card2 * 0.3);
+                break;
+            default:
+                card = card1 * card2;
+        }
         return card <= 0 ? 1 : card;
     }
 
@@ -217,11 +242,30 @@ public class JoinOptimizer {
             HashMap<String, TableStats> stats,
             HashMap<String, Double> filterSelectivities, boolean explain)
             throws ParsingException {
-        //Not necessary for labs 1--3
-
-        // some code goes here
-        //Replace the following
-        return joins;
+        int numJoinNodes = joins.size();
+        PlanCache pc = new PlanCache();
+        Set<LogicalJoinNode> wholeSet = null;
+        for (int i = 1; i <= numJoinNodes; i++) {
+            Set<Set<LogicalJoinNode>> setOfSubset = this.enumerateSubsets(this.joins, i);
+            for (Set<LogicalJoinNode> s : setOfSubset) {
+                if (s.size() == numJoinNodes) {
+                    wholeSet = s;//将join节点的全集保存下来最后用
+                }
+                Double bestCostSofar = Double.MAX_VALUE;
+                CostCard bestPlan = new CostCard();
+                for (LogicalJoinNode toRemove : s) {
+                    CostCard plan = computeCostAndCardOfSubplan(stats, filterSelectivities, toRemove, s, bestCostSofar, pc);
+                    if (plan != null) {
+                        bestCostSofar = plan.cost;
+                        bestPlan = plan;
+                    }
+                }
+                if (bestPlan.plan != null) {
+                    pc.addPlan(s, bestPlan.cost, bestPlan.card, bestPlan.plan);
+                }
+            }
+        }
+        return pc.getOrder(wholeSet);
     }
 
     // ===================== Private Methods =================================

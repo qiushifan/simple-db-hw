@@ -26,9 +26,19 @@ public class LogicalJoinNode {
     public LogicalJoinNode() {
     }
 
+    private String tranversal(String input){
+        if(input.equals("TA")){
+            return "t1";
+        }else if(input.equals("TB")){
+            return "t2";
+        }else {
+            return input;
+        }
+    }
+
     public LogicalJoinNode(String table1, String table2, String joinField1, String joinField2, Predicate.Op pred) {
-        t1Alias = table1;
-        t2Alias = table2;
+        t1Alias = tranversal(table1);
+        t2Alias = tranversal(table2);
         String[] tmps = joinField1.split("[.]");
         if (tmps.length>1)
             f1PureName = tmps[tmps.length-1];
